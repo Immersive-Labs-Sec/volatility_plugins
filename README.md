@@ -8,7 +8,6 @@ To use these plugins you will need to use the `-p /path/to/volatility_pugins` as
 
 ### Cobaltstrike
 
-This plugin has the following components. 
 
 #### Configuration Extraction
 
@@ -16,7 +15,7 @@ This plugin will scan all process in active memory for signs of a Cobalt Strike 
 
 We do not render the full configuration only select elements. A future update will expand the presented fields. 
 
-#### Examples
+#### Example Usage
 
 Scan and output in to JSON format
 
@@ -53,20 +52,6 @@ Progress:  100.00		PDB scanning finished
     "__children": [],
     "x64 Install_Path": "%windir%\\sysnative\\rundll32.exe",
     "x86 Install_Path": "%windir%\\syswow64\\rundll32.exe"
-  },
-  {
-    "Jitter": 0,
-    "License ID": xxxxxxxxxx,
-    "PID": 4604,
-    "POST_PATH": "/submit.php",
-    "Pipe": "",
-    "Port": 443,
-    "Process": "rundll32.exe",
-    "Server": "yellowzinc.corp,/ca",
-    "Sleep": 5000,
-    "__children": [],
-    "x64 Install_Path": "%windir%\\sysnative\\rundll32.exe",
-    "x86 Install_Path": "%windir%\\syswow64\\rundll32.exe"
   }
 ]
 ```
@@ -82,4 +67,24 @@ Formatting...0.00		PDB scanning finished
 * | 4396 | ShellExperienc | 4444 | 10000 |      0 |                   |             | %windir%\syswow64\rundll32.exe | %windir%\sysnative\rundll32.exe | \\.\pipe\msagent_89 | xxxxxxxxxx
 * | 4396 | ShellExperienc | 4444 | 10000 |      0 |                   |             | %windir%\syswow64\rundll32.exe | %windir%\sysnative\rundll32.exe | \\.\pipe\msagent_89 | xxxxxxxxxx
 * | 4604 |   rundll32.exe |  443 |  5000 |      0 | yellowzinc.corp,/ca | /submit.php | %windir%\syswow64\rundll32.exe | %windir%\sysnative\rundll32.exe |                     | xxxxxxxxxx
+```
+
+### Rich Header
+
+This plugin will scan for all runnings proceeses and attempt to recover the rich header. If found the XOR key and the Rich Header Hash will be calculated. 
+
+#### Example Usage
+
+`vol -r pretty -f Server16-CobaltStrike.raw -p ./volatility_plugins/ richheader`
+
+```
+Volatility 3 Framework 2.0.0
+Formatting...0.00               PDB scanning finished                        
+  |  PID |        Process |  XOR Key |                 Rich Header Hash
+* |  380 |       smss.exe | e8fbb614 | b4da76d938693e03d2d455ef37561772
+* |  512 |      csrss.exe | fba319c1 | e4971216867bfffb7beb058dca378a84
+* |  592 |      csrss.exe | fba319c1 | e4971216867bfffb7beb058dca378a84
+* |  608 |    wininit.exe | 75318913 | f8116f1336d2c70bd16b01ad8be7bb6d
+* |  644 |   winlogon.exe | 4bc258ac | c4f0d2eedff3968a8af33cf724e22790
+... SNIP ...
 ```
