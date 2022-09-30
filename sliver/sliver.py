@@ -23,6 +23,7 @@
 import logging
 import re
 import struct
+from binascii import hexlify
 from typing import List
 
 from volatility3.framework import constants, exceptions, renderers, interfaces
@@ -51,7 +52,8 @@ signatures = {
 }
 
 # Matches b64 strings that are not empty values. 
-b64_pattern = '(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})'
+b64_pattern = b'(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})'
+session_key_pattern = b'\x00\n (.{32})\x00'
 
 
 
@@ -111,7 +113,13 @@ class Sliver(interfaces.plugins.PluginInterface):
                 vollog.debug(session_raw_data)
 
                 if rule_name == 'sliver_session_keys':
-                    session_key = session_raw_data.split('\n ')[1][:32]
+                    session_key = re.findall(session_key_pattern, session_raw_data, re.DOTALL)
+
+                    if len(session_key) >= 1:
+                        session_key = session_key[0]
+                    else:
+                        session_key = 'Not Found in memory'
+
                     ecc_keys = re.findall(b64_pattern, session_raw_data)
                     if len(ecc_keys) == 4:
                         implant_private_key = ecc_keys[1]
@@ -123,7 +131,7 @@ class Sliver(interfaces.plugins.PluginInterface):
                                 proc.UniqueProcessId,
                                 process_name,
                                 '192.168.1.1',
-                                session_key,
+                                hexlify(session_key),
                                 implant_private_key,
                                 implant_public_key,
                                 server_public_key
@@ -140,10 +148,10 @@ class Sliver(interfaces.plugins.PluginInterface):
                 ("PID", int),
                 ("Process", str),
                 ("IP Address", str),
-                ("Session Key", str),
-                ("Implant ECC Priv", str),
-                ("Implant ECC Pub", str),
-                ("Server ECC Pub", str),
+                ("Session Key", bytes),
+                ("Implant ECC Priv", bytes),
+                ("Implant ECC Pub", bytes),
+                ("Server ECC Pub", bytes),
             ],
             self._generator(
                 pslist.PsList.list_processes(context = self.context,
