@@ -131,10 +131,10 @@ class Sliver(interfaces.plugins.PluginInterface):
                                 proc.UniqueProcessId,
                                 process_name,
                                 '192.168.1.1',
-                                hexlify(session_key),
-                                implant_private_key,
-                                implant_public_key,
-                                server_public_key
+                                hexlify(session_key).decode(),
+                                implant_private_key.decode(),
+                                implant_public_key.decode(),
+                                server_public_key.decode()
                             )
                         )
 
@@ -148,10 +148,10 @@ class Sliver(interfaces.plugins.PluginInterface):
                 ("PID", int),
                 ("Process", str),
                 ("IP Address", str),
-                ("Session Key", bytes),
-                ("Implant ECC Priv", bytes),
-                ("Implant ECC Pub", bytes),
-                ("Server ECC Pub", bytes),
+                ("Session Key", str),
+                ("Implant ECC Priv", str),
+                ("Implant ECC Pub", str),
+                ("Server ECC Pub", str),
             ],
             self._generator(
                 pslist.PsList.list_processes(context = self.context,
