@@ -41,16 +41,17 @@ except ImportError:
 
 
 signatures = {
-    'cs_config_start': """rule cobaltstrike_config
+    'cs_config_start': """rule sliver_session_keys
                                 {
                                 strings:
-                                  $a = {2E 2F 2E 2F 2E 2C ?? ?? 2E 2C 2E 2F 2E 2C}
-                                  $b = {69 68 69 68 69 6B ?? ?? 69 6B 69 68 69 6B}
-                                  //$c = {?? 00 01 00 01 00 02 ?? ?? 00 02 00 01 00 02}
+                                  $a = "WinHttpGetDefaultProxyConfiguration"
                                 condition:
                                   any of them
                                 }"""
 }
+
+# Matches b64 strings that are not empty values. 
+b64_pattern = '(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})'
 
 
 
@@ -74,65 +75,6 @@ class Sliver(interfaces.plugins.PluginInterface):
                                          optional = True)
         ]
 
-
-    @classmethod
-    def parse_result(self, rule, value):
-        """Parse the config from the result"""
-
-        # https://github.com/Te-k/cobaltstrike/blob/master/lib.py 
-        # This helped me figure out how to walk the structs after XOR
-
-        if value.startswith(b'././'):
-            xor_key = 0x2e
-        elif value.startswith(b'ihih'):
-            xor_key = 105
-        else:
-            xor_key = None
-
-        vollog.debug(f'Found XOR Key {xor_key}')
-        if not xor_key:
-            vollog.info("Unable to find config file")
-            return None
-
-        # XOR the raw values to get the config section
-        data = bytearray([c ^ xor_key for c in value])
-
-        vollog.debug(data)
-
-        config = {}
-        i = 0
-        while i < len(data) - 8:
-            if data[i] == 0 and data[i+1] == 0:
-                break
-            dec = struct.unpack(">HHH", data[i:i+6])
-            if dec[0] == 1:
-                v = struct.unpack(">H", data[i+6:i+8])[0]
-                config["dns"] = ((v & 1) == 1)
-                config["ssl"] = ((v & 8) == 8)
-            else:
-                if dec[0] in CONFIG_STRUCT.keys():
-                    key = CONFIG_STRUCT[dec[0]]
-                else:
-                    vollog.debug("Unknown config command {}".format(dec[0]))
-                    key = str(dec[0])
-                if dec[1] == 1 and dec[2] == 2:
-                    # Short
-                    config[key] = struct.unpack(">H", data[i+6:i+8])[0]
-                elif dec[1] == 2 and dec[2] == 4:
-                    # Int
-                    config[key] = struct.unpack(">I", data[i+6:i+10])[0]
-                elif dec[1] == 3:
-                    # Byte or string
-                    v = data[i+6:i+6+dec[2]]
-                    try:
-                        config[key] = v.decode('utf-8').strip('\x00')
-                    except UnicodeDecodeError:
-                        config[key] = v
-            # Add size + header
-            i += dec[2] + 6
-
-        vollog.debug(config)
-        return config
 
     def _generator(self, procs):
 
@@ -158,23 +100,36 @@ class Sliver(interfaces.plugins.PluginInterface):
             for offset, rule_name, name, value in layer.scan(context = self.context,
                                                              scanner = yarascan.YaraScanner(rules = rules),
                                                              sections = vadyarascan.VadYaraScan.get_vad_maps(proc)):
+                vollog.debug(f'Match at offset: {offset}')
+                try:
+                    session_raw_data = layer.read(offset, 248, False)
+                except exceptions.InvalidAddressException as excp:
+                    vollog.debug("Process {}: invalid address {} in layer {}".format(proc_id, excp.invalid_address,
+                                                                                    excp.layer_name))
+                    continue
 
-                if rule_name == 'cobaltstrike_config':
-                    # Read 1024 bytes from the layer at the offset and try to parse out some values. 
-                    config = self.parse_result(rule_name, layer.read(offset, 3096, False))
-                    yield (0, (
-                        proc.UniqueProcessId,
-                        process_name,
-                        config.get('port', 0),
-                        config.get('sleeptime', 0),
-                        config.get('jitter', 0),
-                        config.get('server,get-uri', ''),
-                        config.get('post-uri', ''),
-                        config.get('spawnto_x86', ''),
-                        config.get('spawnto_x64', ''),
-                        config.get('pipename', ''),
-                        config.get('license-id', 0),
-                        ))
+                vollog.debug(session_raw_data)
+
+                if rule_name == 'sliver_session_keys':
+                    session_key = session_raw_data.split('\n ')[1][:32]
+                    ecc_keys = re.findall(b64_pattern, session_raw_data)
+                    if len(ecc_keys) == 4:
+                        implant_private_key = ecc_keys[1]
+                        implant_public_key = ecc_keys[2]
+                        server_public_key = ecc_keys[3]
+
+                        yield(
+                            0, (
+                                proc.UniqueProcessId,
+                                process_name,
+                                '192.168.1.1',
+                                session_key,
+                                implant_private_key,
+                                implant_public_key,
+                                server_public_key
+                            )
+                        )
+
 
 
     def run(self):
@@ -184,8 +139,8 @@ class Sliver(interfaces.plugins.PluginInterface):
         return renderers.TreeGrid([
                 ("PID", int),
                 ("Process", str),
-                ("Session Key", str),
                 ("IP Address", str),
+                ("Session Key", str),
                 ("Implant ECC Priv", str),
                 ("Implant ECC Pub", str),
                 ("Server ECC Pub", str),
