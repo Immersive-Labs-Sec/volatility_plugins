@@ -46,10 +46,22 @@ signatures = {
                                 {
                                 strings:
                                   $a = "WinHttpGetDefaultProxyConfiguration"
+                                  //$b = {00 00 [32] 00 20 2A} 
                                 condition:
                                   any of them
-                                }"""
+                                }
+                            rule sliver_http
+                                {
+                                    strings:
+                                      $a = /http:\/\/(.*?)\/(.*?)\.(js|html|php|png|woff)\?/
+                                      $b = "http"
+                                    condition:
+                                      any of them
+                                }
+                                """
 }
+
+
 
 # Matches b64 strings that are not empty values. 
 b64_pattern = b'(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})'
@@ -83,6 +95,9 @@ class Sliver(interfaces.plugins.PluginInterface):
         # Compile the list of rules
         rules = yara.compile(sources = signatures)
 
+        domains = {}
+        session_key = None
+
         for proc in procs:
             process_name = utility.array_to_string(proc.ImageFileName)
 
@@ -102,7 +117,7 @@ class Sliver(interfaces.plugins.PluginInterface):
             for offset, rule_name, name, value in layer.scan(context = self.context,
                                                              scanner = yarascan.YaraScanner(rules = rules),
                                                              sections = vadyarascan.VadYaraScan.get_vad_maps(proc)):
-                vollog.debug(f'Match at offset: {offset}')
+                vollog.debug(f'Match {rule_name} at offset: {offset}')
                 try:
                     session_raw_data = layer.read(offset, 248, False)
                 except exceptions.InvalidAddressException as excp:
@@ -110,33 +125,43 @@ class Sliver(interfaces.plugins.PluginInterface):
                                                                                     excp.layer_name))
                     continue
 
-                vollog.debug(session_raw_data)
+                if rule_name == 'sliver_http':
+                    http_match = re.search(b'^(?:http:\/\/|www\.|https:\/\/)([^\/]+)', session_raw_data)
+                    vollog.debug(f"THE MATCH IS {http_match}")
+                    if http_match:
+                        domain_name = http_match.group(1)
+                        vollog.debug(f'The DOMAIN NAME IS {domain_name}')
+                        if domain_name in domains:
+                            domains[domain_name] += 1
+                        else:
+                            domains[domain_name] = 1
 
                 if rule_name == 'sliver_session_keys':
-                    session_key = re.findall(session_key_pattern, session_raw_data, re.DOTALL)
+                    if not session_key:
+                        session_key = re.findall(session_key_pattern, session_raw_data, re.DOTALL)
 
-                    if len(session_key) >= 1:
-                        session_key = session_key[0]
-                    else:
-                        session_key = 'Not Found in memory'
+                        if len(session_key) >= 1:
+                            session_key = session_key[0]
 
-                    ecc_keys = re.findall(b64_pattern, session_raw_data)
-                    if len(ecc_keys) == 4:
-                        implant_private_key = ecc_keys[1]
-                        implant_public_key = ecc_keys[2]
-                        server_public_key = ecc_keys[3]
+                        ecc_keys = re.findall(b64_pattern, session_raw_data)
+                        if len(ecc_keys) == 4:
+                            implant_private_key = ecc_keys[1]
+                            implant_public_key = ecc_keys[2]
+                            server_public_key = ecc_keys[3]
 
-                        yield(
-                            0, (
-                                proc.UniqueProcessId,
-                                process_name,
-                                '192.168.1.1',
-                                hexlify(session_key).decode(),
-                                implant_private_key.decode(),
-                                implant_public_key.decode(),
-                                server_public_key.decode()
-                            )
-                        )
+            top_domain_count = max(domains, key=domains.get)
+
+            yield(
+                0, (
+                    proc.UniqueProcessId,
+                    process_name,
+                    top_domain_count.decode(),
+                    hexlify(session_key).decode(),
+                    implant_private_key.decode(),
+                    implant_public_key.decode(),
+                    server_public_key.decode()
+                )
+            )
 
 
 
@@ -147,7 +172,7 @@ class Sliver(interfaces.plugins.PluginInterface):
         return renderers.TreeGrid([
                 ("PID", int),
                 ("Process", str),
-                ("IP Address", str),
+                ("C2 Callback domain", str),
                 ("Session Key", str),
                 ("Implant ECC Priv", str),
                 ("Implant ECC Pub", str),
